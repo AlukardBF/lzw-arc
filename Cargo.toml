@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 bitvec = "0.10"
-tiny-aes-rs = { git = "https://github.com/AlukardBF/tiny-ars-rs" }
+tiny-aes-rs = { git = "https://github.com/AlukardBF/tiny_aes_rs" }
 
 [dev-dependencies]
 criterion = "0.2"

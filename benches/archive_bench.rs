@@ -1,12 +1,10 @@
 // #[macro_use]
+use bitvec::*;
 use criterion::*;
 use lzw_arc::*;
-use bitvec::*;
 // use bitvec::{BigEndian, BitVec};
 // use lzw_arc;
 // use criterion::Criterion;
-
-
 
 fn criterion_benchmark(c: &mut Criterion) {
     // c.bench_function("from_u64", |b| {
@@ -33,14 +31,14 @@ fn criterion_benchmark(c: &mut Criterion) {
     //         lzw::archive::add_leading_zeros(&bit_buf, 32);
     //     })
     // });
-    let data = lzw::archive::Data::new("test-pic.jpg", "output-pic");
-    c.bench_function("append_to_buf", move |b| {
-        b.iter(|| {
-            
-            let mut bit_buf: BitVec<BigEndian, u8> = BitVec::with_capacity(1024);
-            data.append_to_buf(&mut bit_buf, vec![32u8]);
-        })
-    });
+    // let data = lzw::archive::Data::new("test-pic.jpg", "output-pic");
+    // c.bench_function("append_to_buf", move |b| {
+    //     b.iter(|| {
+
+    //         let mut bit_buf: BitVec<BigEndian, u8> = BitVec::with_capacity(1024);
+    //         data.append_to_buf(&mut bit_buf, vec![32u8]);
+    //     })
+    // });
     // c.bench_function("archive", |b| {
     //     b.iter(|| {
     //         lzw::archive::Data::new("test-pic.jpg", "output-pic").archive()
