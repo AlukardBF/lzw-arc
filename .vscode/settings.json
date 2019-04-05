@@ -1,5 +1,12 @@
 {
     "cSpell.words": [
-        "bitvec"
+        "BLOCKLEN",
+        "KEYLEN",
+        "bitvec",
+        "rcon",
+        "rsbox",
+        "tempa",
+        "xcrypt",
+        "xtime"
     ]
 }

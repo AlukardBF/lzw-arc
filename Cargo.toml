@@ -5,5 +5,12 @@ authors = ["AlukardBF <alukard.develop@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-# ascii = "0.9.1"
 bitvec = "0.10"
+tiny-aes-rs = { git = "https://github.com/AlukardBF/tiny-ars-rs" }
+
+[dev-dependencies]
+criterion = "0.2"
+
+[[bench]]
+name = "archive_bench"
+harness = false
