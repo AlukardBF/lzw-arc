@@ -9,7 +9,7 @@ pub mod lzw {
         pub struct Compress {
             // Для компрессии HashMap, для декомпрессии BTreeMap (вектор?)
             // Словарь, для архивации
-            dictionary: HashMap<Vec<u8>, u32>,
+            dictionary: HashMap<Vec<u8>, Index>,
             // Номер последнего ключа в словаре
             last_in_dic: Index,
             // Путь к исходному файлу
@@ -45,11 +45,11 @@ pub mod lzw {
                 if !std::path::Path::new(source_file).exists() {
                     panic!("Исходный файл не существует!");
                 }
-                let dictionary = reset_compress_dictionary();
+                // let dictionary = reset_compress_dictionary();
                 Compress {
-                    dictionary,
-                    last_in_dic: 255,
-                    bits_count: 8,
+                    dictionary: HashMap::new(),
+                    last_in_dic: 0,
+                    bits_count: 0,
                     source_file: PathBuf::from(source_file),
                     result_file: PathBuf::from(result_file),
                     max_bits_count,
@@ -73,6 +73,7 @@ pub mod lzw {
                 }
             }
             pub fn compress(&mut self) -> std::io::Result<()> {
+                self.reset_compress_dictionary();
                 // Открываем исходный файл и подключаем его к буферу
                 let source_file = File::open(self.source_file.as_path())?;
                 let mut reader = BufReader::new(source_file);
@@ -84,11 +85,6 @@ pub mod lzw {
                 let mut prev: Vec<u8> = Vec::with_capacity(64);
                 // Буфер из бит, для добавления в результирующий поток
                 let mut bit_buf: BitVec<BigEndian, u8> = BitVec::with_capacity(64);
-                // Инициализация. Считываем первый байт
-                // if reader.read(&mut buf)? != buf.len() {
-                //     panic!("Передан пустой файл");
-                // }
-                // prev.push(buf[0]);
                 // Основной цикл алгоритма. Считываем по одному байту, пока не закончится файл
                 while reader.read(&mut buf)? == buf.len() {
                     // Текущий символ
@@ -113,9 +109,7 @@ pub mod lzw {
                 }
                 // Добавляем в буфер оставшиеся байты
                 self.append_to_buf(&mut bit_buf, prev);
-                dbg!(&bit_buf);
                 let last_bytes: Vec<u8> = bit_buf.as_slice().iter().cloned().collect();
-                dbg!(&last_bytes);
                 // Добавляем в файл последние байты, дополняя их нулями
                 result_file.write_all(&last_bytes)?;
                 Ok(())
@@ -128,17 +122,42 @@ pub mod lzw {
                 bit_buf.append(&mut from_index(bv, self.bits_count));
             }
             // Увеличиваем счетчик словаря
-            fn add_element_count(&mut self) {
+            fn _old_add_element_count(&mut self) {
                 self.last_in_dic += 1;
                 let bits_count = 32 - self.last_in_dic.leading_zeros() as u8;
                 // Сбрасываем словарь, если достигли максимального количества бит
                 if bits_count > self.max_bits_count {
-                    self.dictionary = reset_compress_dictionary();
+                    self.reset_compress_dictionary();
                     self.bits_count = 8;
                     self.last_in_dic = 255;
                 } else {
                     self.bits_count = bits_count;
                 }
+            }
+            fn add_element_count(&mut self) -> bool {
+                // let bits_count = 32 - self.last_in_dic.leading_zeros() as u8;
+                let bits_count = get_bits_count(self.dictionary.len() as Index) as u8;
+                // Сбрасываем словарь, если достигли максимального количества бит
+                // if bits_count > self.max_bits_count {
+                if self.dictionary.len() + 1 == (1 << self.max_bits_count) as usize {
+                    self.reset_compress_dictionary();
+                    self.last_in_dic += 1;
+                    true
+                } else {
+                    self.bits_count = bits_count;
+                    self.last_in_dic += 1;
+                    false
+                }
+            }
+            fn reset_compress_dictionary(&mut self) {
+                // Инициализируем словарь из всех значений, которые можно хранить
+                // в одном байте (0..255)
+                self.dictionary.clear();
+                for ch in u8::min_value()..=u8::max_value() {
+                    self.dictionary.insert(vec![ch], u32::from(ch));
+                }
+                self.bits_count = 8;
+                self.last_in_dic = 255;
             }
         }
         impl Decompress {
@@ -279,7 +298,6 @@ pub mod lzw {
                     
                     // Считываем из буфера по байту, пока не достигнем нужного,
                     // для извлечения индекса, количества бит
-                    dbg!(bits_count);
                     while bit_buf.len() < bits_count as usize {
                         if reader.read(&mut buf)? != buf.len() {
                             // Если в файле не хватило данных для нового индекса,
@@ -294,13 +312,11 @@ pub mod lzw {
                         "Ошибка в извлечении индекса из битового буфера"
                     );
                     // Меняем тип к usize, чтобы индексировать вектор
-                    index = dbg!(index_tmp) as usize;
+                    index = index_tmp as usize;
 
                     // let mut decomp_code = string.clone();
                     // Если считанный индекс существует
                     if index > self.dictionary.len() {
-                        dbg!(self.dictionary.len());
-                        dbg!(index);
                         panic!("Неверный зашифрованный код");
                     } else if index == self.dictionary.len() {
                         string.push(string[0]);
@@ -317,9 +333,7 @@ pub mod lzw {
                     string = code.to_vec();
                     
                     // Сбрасываем словарь, если наполнили его
-                    if self.dictionary.len() == 1 << self.max_bits_count as usize {
-                        dbg!("Сброс!");
-                        dbg!(&string);
+                    if self.dictionary.len() + 1 == 1 << self.max_bits_count as usize {
                         self.reset_decompress_dictionary();
                         bits_count = get_bits_count((self.dictionary.len() - 1) as Index);
                     } else {
@@ -378,7 +392,7 @@ pub mod lzw {
                 self.last_in_dic = 4;
             }
         }
-        fn reset_compress_dictionary() -> HashMap<Vec<u8>, u32> {
+        /*fn reset_compress_dictionary() -> HashMap<Vec<u8>, u32> {
             let mut dictionary: HashMap<Vec<u8>, u32> = HashMap::new();
             // Инициализируем словарь из всех значений, которые можно хранить
             // в одном байте (0..255)
@@ -386,7 +400,7 @@ pub mod lzw {
                 dictionary.insert(vec![ch], u32::from(ch));
             }
             dictionary
-        }
+        }*/
         #[cfg(debug_assertions)]
         fn test_compress() -> HashMap<Vec<u8>, u32> {
             let mut dictionary: HashMap<Vec<u8>, u32> = HashMap::new();

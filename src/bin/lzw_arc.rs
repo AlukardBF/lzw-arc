@@ -25,15 +25,11 @@ fn _test_main() -> std::io::Result<()> {
     }
     Ok(())
 }
-use bitvec::bitvec;
 fn main() -> std::io::Result<()> {
-    lzw::archive::Compress::new("test-track.m4a", "output", 16).compress()?;
-    lzw::archive::Decompress::new("output", "test-output", 16).decompress()?;
-    // let bv = bitvec![0, 1, 1, 1];
-    // let mut index = 0u8;
-    // for (i, j) in (0..bv.len()).rev().enumerate() {
-    //     index |= (bv[j] as u8) << i;
-    // }
-    // dbg!(index);
+    println!("Компрессия");
+    lzw::archive::Compress::new("test.jpg", "output", 16).compress()?;
+    println!("Декомпрессия");
+    lzw::archive::Decompress::new("output", "test-output.jpg", 16).decompress()?;
+    println!("Готово!");
     Ok(())
 }
