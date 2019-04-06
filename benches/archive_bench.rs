@@ -3,8 +3,11 @@ use criterion::*;
 use lzw_arc::lzw;
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("archive", |b| {
-        b.iter(|| lzw::archive::Compress::new("test", "output", 16).compress())
+    c.bench_function("compress", |b| {
+        b.iter(|| lzw::compress("test-file", "output", 16))
+    });
+    c.bench_function("compress", |b| {
+        b.iter(|| lzw::decompress("output", "test-output", 16))
     });
 }
 

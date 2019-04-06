@@ -1,4 +1,5 @@
 use lzw_arc::lzw;
+#[cfg(debug_assertion)]
 fn _test_main() -> std::io::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let mut source_path = String::from("source");
@@ -27,9 +28,9 @@ fn _test_main() -> std::io::Result<()> {
 }
 fn main() -> std::io::Result<()> {
     println!("Компрессия");
-    lzw::archive::Compress::new("test.jpg", "output", 16).compress()?;
+    lzw::compress("test-file", "output", 16)?;
     println!("Декомпрессия");
-    lzw::archive::Decompress::new("output", "test-output.jpg", 16).decompress()?;
+    lzw::decompress("output", "test-output", 16)?;
     println!("Готово!");
     Ok(())
 }
