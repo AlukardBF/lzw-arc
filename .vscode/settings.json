@@ -3,6 +3,7 @@
         "BLOCKLEN",
         "KEYLEN",
         "bitvec",
+        "decomp",
         "rcon",
         "rsbox",
         "tempa",
