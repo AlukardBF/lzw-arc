@@ -1,6 +1,6 @@
 use lzw_arc::lzw;
-use std::fs::remove_file;
 use same_file::is_same_file;
+use std::fs::remove_file;
 
 #[test]
 fn compress_test() {

@@ -1,17 +1,12 @@
 pub mod lzw {
     use bitvec::{BigEndian, BitVec};
-    use std::collections::HashMap;
+    use indexmap::IndexSet;
     use std::fs::File;
     use std::io::{BufReader, Read, Write};
-    use std::path::PathBuf;
     type Index = u32;
     struct Compress {
         // Словарь, для архивации
-        dictionary: HashMap<Vec<u8>, Index>,
-        // Путь к исходному файлу
-        source_file: PathBuf,
-        // Путь к конечному файлу
-        result_file: PathBuf,
+        dictionary: IndexSet<Vec<u8>>,
         // Текущее количество бит в максимальном значении словаря
         bits_count: u8,
         // Максимальное количество бит, т.е. размер словаря
@@ -20,38 +15,30 @@ pub mod lzw {
     struct Decompress {
         // Словарь, для архивации
         dictionary: Vec<Vec<u8>>,
-        // Путь к исходному файлу
-        source_file: PathBuf,
-        // Путь к конечному файлу
-        result_file: PathBuf,
         // Максимальное количество бит, т.е. размер словаря
         max_bits_count: u8,
     }
     impl Compress {
         /// Инициализируем структуру начальными значениями
-        fn new(source_file: &str, result_file: &str, max_bits_count: u8) -> Compress {
+        fn new(max_bits_count: u8) -> Compress {
             if max_bits_count > 32 || max_bits_count < 9 {
                 panic!("Недопустимый размер словаря! Разрешенный: 9 <= n <= 32");
             }
-            if !std::path::Path::new(source_file).exists() {
-                panic!("Исходный файл не существует!");
-            }
-            // let dictionary = reset_compress_dictionary();
             Compress {
-                dictionary: HashMap::new(),
+                dictionary: IndexSet::new(),
                 bits_count: 0,
-                source_file: PathBuf::from(source_file),
-                result_file: PathBuf::from(result_file),
                 max_bits_count,
             }
         }
-        fn compress(&mut self) -> std::io::Result<()> {
+        fn compress<R: Read, W: Write>(
+            &mut self,
+            reader: R,
+            writer: &mut W,
+        ) -> std::io::Result<()> {
+            // Задаем начальный словарь
             self.reset_compress_dictionary();
             // Открываем исходный файл и подключаем его к буферу
-            let source_file = File::open(self.source_file.as_path())?;
-            let mut reader = BufReader::new(source_file);
-            // Выходной поток
-            let mut result_file = File::create(self.result_file.as_path())?;
+            let mut reader = BufReader::new(reader);
             // Буфер для считываемого байта
             let mut buf = [0u8; 1];
             // Предыдущая строка
@@ -64,19 +51,19 @@ pub mod lzw {
                 let current: u8 = buf[0];
                 prev.push(current);
                 // Набор байт уже присутствует в словаре?
-                if !self.dictionary.contains_key(&prev) {
+                if !self.dictionary.contains(&prev) {
                     // Добавляем P в буфер
                     self.append_to_buf(&mut bit_buf, prev[0..prev.len() - 1].to_vec());
                     // Меняем номер последнего ключа в словаре
                     self.add_element_count();
                     // P + C в словарь
-                    self.dictionary.insert(prev.clone(), self.dictionary.len() as Index);
+                    self.dictionary.insert(prev.clone());
                     // P = C
                     prev.clear();
                     prev.push(current);
                     //Проверяем, может ли добавить что-то в файл
                     while let Some(byte) = pop_byte(&mut bit_buf) {
-                        result_file.write_all(&[byte])?;
+                        writer.write_all(&[byte])?;
                     }
                 }
             }
@@ -84,15 +71,15 @@ pub mod lzw {
             self.append_to_buf(&mut bit_buf, prev);
             let last_bytes: Vec<u8> = bit_buf.as_slice().iter().cloned().collect();
             // Добавляем в файл последние байты, дополняя их нулями
-            result_file.write_all(&last_bytes)?;
+            writer.write_all(&last_bytes)?;
             Ok(())
         }
         /// Добавляем в буфер кодовое значение из словаря, для дальнейшего добавления в файл
         fn append_to_buf(&self, bit_buf: &mut BitVec<BigEndian, u8>, value: Vec<u8>) {
-            let bv = *self.dictionary.get(&value).expect(
+            let (index, _) = self.dictionary.get_full(&value).expect(
                 "Ошибка при получении значения из словаря",
             );
-            bit_buf.append(&mut from_index(bv, self.bits_count));
+            bit_buf.append(&mut from_index(index as Index, self.bits_count));
         }
         // Увеличиваем счетчик словаря
         fn add_element_count(&mut self) -> bool {
@@ -111,35 +98,31 @@ pub mod lzw {
             // в одном байте (0..255)
             self.dictionary.clear();
             for ch in u8::min_value()..=u8::max_value() {
-                self.dictionary.insert(vec![ch], u32::from(ch));
+                self.dictionary.insert(vec![ch]);
             }
             self.bits_count = 8;
         }
     }
     impl Decompress {
         /// Инициализируем структуру начальными значениями
-        fn new(source_file: &str, result_file: &str, max_bits_count: u8) -> Decompress {
+        fn new(max_bits_count: u8) -> Decompress {
             if max_bits_count > 32 || max_bits_count < 9 {
                 panic!("Недопустимый размер словаря! Разрешенный: 9 <= n <= 32");
             }
-            if !std::path::Path::new(source_file).exists() {
-                panic!("Исходный файл не существует!");
-            }
             Decompress {
                 dictionary: Vec::new(),
-                source_file: PathBuf::from(source_file),
-                result_file: PathBuf::from(result_file),
                 max_bits_count,
             }
         }
-        fn decompress(&mut self) -> std::io::Result<()> {
+        fn decompress<R: Read, W: Write>(
+            &mut self,
+            reader: R,
+            writer: &mut W,
+        ) -> std::io::Result<()> {
             // Задаем начальный словарь
             self.reset_decompress_dictionary();
             // Открываем исходный файл и подключаем его к буферу
-            let source_file = File::open(self.source_file.as_path())?;
-            let mut reader = BufReader::new(source_file);
-            // Выходной поток
-            let mut result_file = File::create(self.result_file.as_path())?;
+            let mut reader = BufReader::new(reader);
             // Буфер для считываемого байта
             let mut buf = [0u8; 1];
             // Буфер из бит, для добавления в результирующий поток
@@ -153,16 +136,15 @@ pub mod lzw {
             let mut bits_count = get_bits_count((self.dictionary.len() - 1) as Index);
             // Основной цикл алгоритма
             loop {
-                
                 // Считываем из буфера по байту, пока не достигнем нужного,
                 // для извлечения индекса, количества бит
                 while bit_buf.len() < bits_count {
                     if reader.read(&mut buf)? != buf.len() {
                         // Если встретили конец файла, завершаем работу алгоритма
-                        return Ok(())
+                        return Ok(());
                     }
                     // Добавляем байт в буфер
-                    bit_buf.append(&mut from_index(buf[0] as Index, 8));
+                    bit_buf.append(&mut from_index(u32::from(buf[0]), 8));
                 }
                 // Извлекаем индекс
                 let index_tmp: Index = pop_first_bits(&mut bit_buf, bits_count as u8).expect(
@@ -178,7 +160,7 @@ pub mod lzw {
                     string.push(string[0]);
                 // Если элемент с заданным индексом есть в словаре
                 } else if !string.is_empty() {
-                    string.push(self.dictionary.get(index).unwrap()[0]);
+                    string.push(self.dictionary[index][0]);
                 }
                 // Добавление в словарь
                 if !string.is_empty() {
@@ -188,9 +170,9 @@ pub mod lzw {
                     "Ошибка в извлечении кодового слова из словаря"
                 );
                 // Записываем в файл
-                result_file.write_all(&code[..])?;
+                writer.write_all(&code[..])?;
                 string = code.to_vec();
-                
+
                 // Сбрасываем словарь, если наполнили его
                 if self.dictionary.len() + 1 == 1 << self.max_bits_count as usize {
                     self.reset_decompress_dictionary();
@@ -250,15 +232,27 @@ pub mod lzw {
     }
 
     /// Запускает компрессию файла
-    pub fn compress(source_file: &str, result_file: &str, max_bits_count: u8) -> std::io::Result<()> {
-        let mut compress_struct = Compress::new(source_file, result_file, max_bits_count);
-        compress_struct.compress()?;
+    pub fn compress(
+        source_file: &str,
+        result_file: &str,
+        max_bits_count: u8,
+    ) -> std::io::Result<()> {
+        let mut compress_struct = Compress::new(max_bits_count);
+        let reader = File::open(source_file)?;
+        let mut writer = File::create(result_file)?;
+        compress_struct.compress(reader, &mut writer)?;
         Ok(())
     }
     /// Запускает декомпрессию файла
-    pub fn decompress(source_file: &str, result_file: &str, max_bits_count: u8) -> std::io::Result<()> {
-        let mut decompress_struct = Decompress::new(source_file, result_file, max_bits_count);
-        decompress_struct.decompress()?;
+    pub fn decompress(
+        source_file: &str,
+        result_file: &str,
+        max_bits_count: u8,
+    ) -> std::io::Result<()> {
+        let mut decompress_struct = Decompress::new(max_bits_count);
+        let reader = File::open(source_file)?;
+        let mut writer = File::create(result_file)?;
+        decompress_struct.decompress(reader, &mut writer)?;
         Ok(())
     }
 }

@@ -4,6 +4,7 @@
         "KEYLEN",
         "bitvec",
         "decomp",
+        "indexmap",
         "rcon",
         "rsbox",
         "tempa",
