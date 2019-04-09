@@ -1,8 +1,33 @@
+// #![feature(async_await, await_macro, futures_api)]
 pub mod lzw {
+    // Модуль генерации, проверки ключа шифрования
+    mod derive {
+        use ring::{digest, pbkdf2};
+        use std::num::NonZeroU32;
+        const KEY_LEN: usize = 128 / 8;
+        type CypherKey = [u8; KEY_LEN];
+        // Алгоритм генерации псевдо-случайных чисел
+        static DIGEST_ALG: &'static digest::Algorithm = &digest::SHA256;
+        // Соль
+        const SALT: CypherKey = [
+            0xd6, 0x26, 0x98, 0xda, 0xf4, 0xdc, 0x50, 0x52, 0x24, 0xf2, 0x27, 0xd1, 0xfe, 0x39,
+            0x01, 0x8a,
+        ];
+        pub fn derive_key(secret: &str) -> CypherKey {
+            // Ключ
+            let mut key = [0u8; KEY_LEN];
+            // Количество итераций
+            let iterations = NonZeroU32::new(100_000).unwrap();
+            // Генерируем ключ
+            pbkdf2::derive(DIGEST_ALG, iterations, &SALT, secret.as_bytes(), &mut key);
+            key
+        }
+    }
+
     use bitvec::{BigEndian, BitVec};
     use indexmap::IndexSet;
     use std::fs::File;
-    use std::io::{BufReader, Read, Write};
+    use std::io::{BufReader, BufWriter, Read, Write};
     type Index = u32;
     struct Compress {
         // Словарь, для архивации
@@ -20,11 +45,11 @@ pub mod lzw {
     }
     impl Compress {
         /// Инициализируем структуру начальными значениями
-        fn new(max_bits_count: u8) -> Compress {
+        fn new(max_bits_count: u8) -> Self {
             if max_bits_count > 32 || max_bits_count < 9 {
                 panic!("Недопустимый размер словаря! Разрешенный: 9 <= n <= 32");
             }
-            Compress {
+            Self {
                 dictionary: IndexSet::new(),
                 bits_count: 0,
                 max_bits_count,
@@ -37,14 +62,16 @@ pub mod lzw {
         ) -> std::io::Result<()> {
             // Задаем начальный словарь
             self.reset_compress_dictionary();
-            // Открываем исходный файл и подключаем его к буферу
+            // Создаем буфер для reader, что ускорит чтение
             let mut reader = BufReader::new(reader);
+            // Создаем буфер для writer, что ускорит запись
+            let mut writer = BufWriter::new(writer);
             // Буфер для считываемого байта
             let mut buf = [0u8; 1];
             // Предыдущая строка
             let mut prev: Vec<u8> = Vec::with_capacity(64);
             // Буфер из бит, для добавления в результирующий поток
-            let mut bit_buf: BitVec<BigEndian, u8> = BitVec::with_capacity(64);
+            let mut bit_buf: BitVec<BigEndian, u8> = BitVec::with_capacity(32);
             // Основной цикл алгоритма. Считываем по одному байту, пока не закончится файл
             while reader.read(&mut buf)? == buf.len() {
                 // Текущий символ
@@ -61,7 +88,6 @@ pub mod lzw {
                     // P = C
                     prev.clear();
                     prev.push(current);
-                    //Проверяем, может ли добавить что-то в файл
                     while let Some(byte) = pop_byte(&mut bit_buf) {
                         writer.write_all(&[byte])?;
                     }
@@ -69,7 +95,7 @@ pub mod lzw {
             }
             // Добавляем в буфер оставшиеся байты
             self.append_to_buf(&mut bit_buf, prev);
-            let last_bytes: Vec<u8> = bit_buf.as_slice().iter().cloned().collect();
+            let last_bytes: Vec<u8> = bit_buf.as_slice().to_vec();
             // Добавляем в файл последние байты, дополняя их нулями
             writer.write_all(&last_bytes)?;
             Ok(())
@@ -105,11 +131,11 @@ pub mod lzw {
     }
     impl Decompress {
         /// Инициализируем структуру начальными значениями
-        fn new(max_bits_count: u8) -> Decompress {
+        fn new(max_bits_count: u8) -> Self {
             if max_bits_count > 32 || max_bits_count < 9 {
                 panic!("Недопустимый размер словаря! Разрешенный: 9 <= n <= 32");
             }
-            Decompress {
+            Self {
                 dictionary: Vec::new(),
                 max_bits_count,
             }
@@ -121,8 +147,10 @@ pub mod lzw {
         ) -> std::io::Result<()> {
             // Задаем начальный словарь
             self.reset_decompress_dictionary();
-            // Открываем исходный файл и подключаем его к буферу
+            // Создаем буфер для reader, что ускорит чтение
             let mut reader = BufReader::new(reader);
+            // Создаем буфер для writer, что ускорит запись
+            let mut writer = BufWriter::new(writer);
             // Буфер для считываемого байта
             let mut buf = [0u8; 1];
             // Буфер из бит, для добавления в результирующий поток
@@ -235,9 +263,9 @@ pub mod lzw {
     pub fn compress(
         source_file: &str,
         result_file: &str,
-        max_bits_count: u8,
+        max_bits_count: usize,
     ) -> std::io::Result<()> {
-        let mut compress_struct = Compress::new(max_bits_count);
+        let mut compress_struct = Compress::new(max_bits_count as u8);
         let reader = File::open(source_file)?;
         let mut writer = File::create(result_file)?;
         compress_struct.compress(reader, &mut writer)?;
@@ -247,12 +275,80 @@ pub mod lzw {
     pub fn decompress(
         source_file: &str,
         result_file: &str,
-        max_bits_count: u8,
+        max_bits_count: usize,
     ) -> std::io::Result<()> {
-        let mut decompress_struct = Decompress::new(max_bits_count);
+        let mut decompress_struct = Decompress::new(max_bits_count as u8);
         let reader = File::open(source_file)?;
         let mut writer = File::create(result_file)?;
         decompress_struct.decompress(reader, &mut writer)?;
+        Ok(())
+    }
+    /* Компрессия и декомпрессия с AES шифрованием */
+    use small_aes_rs::{AesCtx, Block};
+    /// Компрессия с применением AES шифрования
+    pub fn compress_aes(
+        source_file: &str,
+        result_file: &str,
+        max_bits_count: usize,
+        secret: &str,
+    ) -> std::io::Result<()> {
+        // Архивирование
+        let mut compress_struct = Compress::new(max_bits_count as u8);
+        let reader = File::open(source_file)?;
+        /* Создадим буфер с запасом
+         * По наблюдениям, файлы с высокой энтропией раздуваются
+         * максимум на ~133% от начального.
+         * Но возьмем буфер с запасом в 140%, так как
+         * дополнительные выделения памяти очень дороги
+         */
+        let capacity = reader.metadata()?.len() as f32 * 1.4;
+        let mut buf: Vec<u8> = Vec::with_capacity(capacity as usize);
+        compress_struct.compress(reader, &mut buf)?;
+        // Усечем буфер до его длины, освободив лишнюю выделенную память
+        buf.shrink_to_fit();
+        /* Шифрование */
+        let mut writer = File::create(result_file)?;
+        // Получаем 128-битный ключ и вектор инициализации (IV)
+        let key = derive::derive_key(secret);
+        let iv: Block = rand::random();
+        // Пишем вектор инициализации в файл
+        writer.write_all(&iv)?;
+        // Инициализируем AES ключом и IV
+        let mut aes = AesCtx::with_iv(key, iv);
+        // Шифруем
+        aes.aes_cbc_encrypt_buffer(buf.as_slice(), &mut writer)?;
+        Ok(())
+    }
+    /// Декомпрессия с применением AES шифрования
+    pub fn decompress_aes(
+        source_file: &str,
+        result_file: &str,
+        max_bits_count: usize,
+        secret: &str,
+    ) -> std::io::Result<()> {
+        let mut decompress_struct = Decompress::new(max_bits_count as u8);
+        let mut reader = File::open(source_file)?;
+        let mut writer = File::create(result_file)?;
+        // Считываем вектор инициализации из файла
+        let mut iv: Block = Default::default();
+        reader.read_exact(&mut iv)?;
+        // Считываем оставшийся файл (шифротекст)
+        /* Создаем буфер для оставшегося шифротекста
+         * reader.metadata()?.len() - iv.len() дают размер шифротекста без вектора инициализации
+         * Плюс выделяем еще один байт сверху, для исключения перевыделения памяти под вектор
+         * Так как read_to_end считывает по одному байту в цикле, и конечный байт (EOF) не поместится в вектор
+         * Что вызовет новое выделение памяти
+         */
+        let capacity = reader.metadata()?.len() as usize - iv.len() + 1;
+        let mut buf: Vec<u8> = Vec::with_capacity(capacity);
+        // Получаем 128-битный ключ
+        let key = derive::derive_key(secret);
+        // Инициализируем AES ключом и IV
+        let mut aes = AesCtx::with_iv(key, iv);
+        // Расшифровываем
+        aes.aes_cbc_decrypt_buffer(reader, &mut buf)?;
+        // Передаем на декомпрессию (разархивирование)
+        decompress_struct.decompress(buf.as_slice(), &mut writer)?;
         Ok(())
     }
 }

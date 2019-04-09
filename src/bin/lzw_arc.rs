@@ -1,36 +1,57 @@
+use clap::{crate_version, App, Arg};
 use lzw_arc::lzw;
-#[cfg(debug_assertion)]
-fn _test_main() -> std::io::Result<()> {
-    let args: Vec<String> = std::env::args().collect();
-    let mut source_path = String::from("source");
-    let mut destination_path = String::from("destination");
-    if args.len() >= 2 {
-        source_path = args[1].clone();
-    }
-    if args.len() >= 3 {
-        destination_path = args[2].clone();
-    }
-    println!("Выберите режим работы: ");
-    println!("1. Архивация");
-    //println!("2. Распаковка");
-    println!("> ");
-    let mut mode_string = String::with_capacity(3);
-    std::io::stdin()
-        .read_line(&mut mode_string)
-        .expect("Ошибка при чтении выбора");
-    let mode = mode_string.trim().parse::<isize>().unwrap();
-    match mode {
-        1 => lzw::archive::Compress::new(&source_path, &destination_path, 16).compress()?,
-        //2 => tea_cypher::decrypt(get_secret, &source_path, &destination_path)?,
-        _ => panic!("Неправильный выбор режима"),
-    }
-    Ok(())
-}
 fn main() -> std::io::Result<()> {
-    println!("Компрессия");
-    lzw::compress("test-file", "output", 16)?;
-    println!("Декомпрессия");
-    lzw::decompress("output", "test-output", 16)?;
-    println!("Готово!");
+    let matches = App::new("LZW Archiver")
+        .version(crate_version!())
+        .author("Dmitriy H. <alukard.develop@gmail.com>")
+        .about("lzw file archiver with aes encryption")
+        .arg(
+            Arg::with_name("mode")
+                .help("a for compress and e for extract")
+                .index(1)
+                .possible_values(&["a", "e"])
+                .required(true),
+        )
+        .arg(Arg::with_name("input_file").index(2).required(true))
+        .arg(Arg::with_name("result_file").index(3).required(true))
+        .arg(
+            Arg::with_name("bits_count")
+                .help("dictionary bits count, in other words, dictionary size")
+                .takes_value(true)
+                .short("b")
+                .long("bits")
+                .required(false)
+                .default_value("16"),
+        )
+        .arg(
+            Arg::with_name("password")
+                .help("password, enable aes encryption")
+                .takes_value(true)
+                .short("p")
+                .long("pass")
+                .required(false),
+        )
+        .get_matches();
+
+    let source_file = matches.value_of("input_file").unwrap();
+    let result_file = matches.value_of("result_file").unwrap();
+    let bits_count: usize = matches.value_of("bits_count").unwrap().parse().unwrap();
+    match matches.value_of("mode").unwrap() {
+        "a" => {
+            if let Some(pass) = matches.value_of("password") {
+                lzw::compress_aes(source_file, result_file, bits_count, pass)?;
+            } else {
+                lzw::compress(source_file, result_file, bits_count)?;
+            }
+        }
+        "e" => {
+            if let Some(pass) = matches.value_of("password") {
+                lzw::decompress_aes(source_file, result_file, bits_count, pass)?;
+            } else {
+                lzw::decompress(source_file, result_file, bits_count)?;
+            }
+        }
+        _ => unreachable!(),
+    }
     Ok(())
 }

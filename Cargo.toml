@@ -1,13 +1,17 @@
 [package]
 name = "lzw_arc"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["AlukardBF <alukard.develop@gmail.com>"]
 edition = "2018"
+publish = false
 
 [dependencies]
 bitvec = "0.10"
-indexmap = "1.0.2"
-# tiny-aes-rs = { git = "https://github.com/AlukardBF/tiny_aes_rs" }
+indexmap = "1.0"
+ring = "0.14"
+rand = "0.6"
+clap = "2"
+small_aes_rs = { git = "https://github.com/AlukardBF/small_aes_rs" }
 
 [dev-dependencies]
 criterion = "0.2"

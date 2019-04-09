@@ -1,4 +1,8 @@
 .vscode/*
 /target
 **/*.rs.bk
+Cargo.lock
 output*
+test*
+!test-file
+!test-compressed
