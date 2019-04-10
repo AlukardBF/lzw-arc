@@ -48,8 +48,15 @@ pub mod lzw {
     struct Decompress {
         // Словарь, для архивации
         dictionary: Vec<Vec<u8>>,
+        bits_count: usize,
         // Максимальное количество бит, т.е. размер словаря
         max_bits_count: u8,
+        // Текущий считанный индекс кодового слова
+        index: usize,
+        // Прошлое кодовое слово
+        string: Vec<u8>,
+        // Буфер из бит, для добавления в результирующий поток
+        bit_buf: BitVec<BigEndian, u8>,
     }
     impl Compress {
         /// Инициализируем структуру начальными значениями
@@ -59,7 +66,7 @@ pub mod lzw {
             }
             Self {
                 dictionary: IndexSet::new(),
-                bits_count: 0,
+                bits_count: 8,
                 max_bits_count,
                 prev: Vec::with_capacity(64),
                 bit_buf: BitVec::with_capacity(32),
@@ -70,8 +77,6 @@ pub mod lzw {
             reader: R,
             writer: &mut W,
         ) -> std::io::Result<()> {
-            // Задаем начальный словарь
-            // self.reset_dictionary();
             // Создаем буфер для reader, что ускорит чтение
             let mut reader = BufReader::new(reader);
             // Создаем буфер для writer, что ускорит запись
@@ -148,7 +153,11 @@ pub mod lzw {
             }
             Self {
                 dictionary: Vec::new(),
+                bits_count: 8,
                 max_bits_count,
+                index: 0,
+                string: Vec::new(),
+                bit_buf: BitVec::with_capacity(64),
             }
         }
         fn decompress<R: Read, W: Write>(
@@ -156,70 +165,58 @@ pub mod lzw {
             reader: R,
             writer: &mut W,
         ) -> std::io::Result<()> {
-            // Задаем начальный словарь
-            self.reset_dictionary();
             // Создаем буфер для reader, что ускорит чтение
             let mut reader = BufReader::new(reader);
             // Создаем буфер для writer, что ускорит запись
             let mut writer = BufWriter::new(writer);
             // Буфер для считываемого байта
             let mut buf = [0u8; 1];
-            // Буфер из бит, для добавления в результирующий поток
-            let mut bit_buf: BitVec<BigEndian, u8> = BitVec::with_capacity(64);
-
-            // Текущий считанный индекс кодового слова
-            let mut index: usize;
-            // Прошлое кодовое слово
-            let mut string: Vec<u8> = Vec::new();
-            // Количество бит для первого числа
-            let mut bits_count = get_bits_count((self.dictionary.len() - 1) as Index);
             // Основной цикл алгоритма
             loop {
                 // Считываем из буфера по байту, пока не достигнем нужного,
                 // для извлечения индекса, количества бит
-                while bit_buf.len() < bits_count {
+                while self.bit_buf.len() < self.bits_count {
                     if reader.read(&mut buf)? != buf.len() {
                         // Если встретили конец файла, завершаем работу алгоритма
                         return Ok(());
                     }
                     // Добавляем байт в буфер
-                    bit_buf.append(&mut from_index(u32::from(buf[0]), 8));
+                    self.bit_buf.append(&mut from_index(u32::from(buf[0]), 8));
                 }
                 // Извлекаем индекс
-                let index_tmp: Index = pop_first_bits(&mut bit_buf, bits_count as u8).expect(
+                let index_tmp: Index = pop_first_bits(&mut self.bit_buf, self.bits_count as u8).expect(
                     "Ошибка в извлечении индекса из битового буфера"
                 );
                 // Меняем тип к usize, чтобы индексировать вектор
-                index = index_tmp as usize;
+                self.index = index_tmp as usize;
                 // Если индекс больше размера массива, значит файл некорректен
-                if index > self.dictionary.len() {
+                if self.index > self.dictionary.len() {
                     panic!("Неверный зашифрованный код");
                 // Если индекс равен размеру словаря, то кодового слова нет, добавим в словарь
-                } else if index == self.dictionary.len() {
-                    string.push(string[0]);
+                } else if self.index == self.dictionary.len() {
+                    self.string.push(self.string[0]);
                 // Если элемент с заданным индексом есть в словаре
-                } else if !string.is_empty() {
-                    string.push(self.dictionary[index][0]);
+                } else if !self.string.is_empty() {
+                    self.string.push(self.dictionary[self.index][0]);
                 }
                 // Добавление в словарь
-                if !string.is_empty() {
-                    self.dictionary.push(string);
+                if !self.string.is_empty() {
+                    self.dictionary.push(self.string.clone());
                 }
-                let code = self.dictionary.get(index).expect(
+                let code = self.dictionary.get(self.index).expect(
                     "Ошибка в извлечении кодового слова из словаря"
                 );
                 // Записываем в файл
                 writer.write_all(&code[..])?;
-                string = code.to_vec();
-
+                self.string = code.to_vec();
                 // Сбрасываем словарь, если наполнили его
                 if self.dictionary.len() + 1 == 1 << self.max_bits_count as usize {
                     self.reset_dictionary();
                     // Для первого считываемого байта, возьмем количество бит от размера словаря минус 1
-                    bits_count = get_bits_count((self.dictionary.len() - 1) as Index);
+                    self.bits_count = get_bits_count((self.dictionary.len() - 1) as Index);
                 } else {
                     // Количество бит для считывания следующего индекса
-                    bits_count = get_bits_count(self.dictionary.len() as Index);
+                    self.bits_count = get_bits_count(self.dictionary.len() as Index);
                 }
             }
         }
@@ -313,7 +310,9 @@ pub mod lzw {
         lzw_struct.reset_dictionary();
         let mut reader = BufReader::new(File::open(source_file)?);
         let mut writer = File::create(result_file)?;
+        // Промежуточный буфер для чтения
         let mut buf_read: Vec<u8> = vec![0u8; AES_BLOCKLEN];
+        // Промежуточный буфер для записи
         // По наблюдением, не нужен более чем 50 байт
         let mut buf_write: Vec<u8> = Vec::with_capacity(50);
         // Объекты шифрования
@@ -342,7 +341,6 @@ pub mod lzw {
         aes.aes_cbc_encrypt_buffer(buf_write.as_slice(), &mut writer)?;
         Ok(())
     }
-    // */
     /// Декомпрессия с применением AES шифрования
     pub fn decompress_aes(
         source_file: &str,
@@ -350,29 +348,47 @@ pub mod lzw {
         max_bits_count: usize,
         secret: &str,
     ) -> std::io::Result<()> {
+        // Инициализируем объекты
         let mut lzw_struct = Decompress::new(max_bits_count as u8);
-        let mut reader = File::open(source_file)?;
+        lzw_struct.reset_dictionary();
+        let mut reader = BufReader::new(File::open(source_file)?);
         let mut writer = File::create(result_file)?;
+        // Промежуточный буфер для чтения
+        let mut buf_read: Vec<u8> = vec![0u8; AES_BLOCKLEN];
+        // Промежуточный буфер для записи
+        let mut buf_write: Vec<u8> = Vec::with_capacity(AES_BLOCKLEN);
         // Считываем вектор инициализации из файла
         let mut iv: Block = Default::default();
         reader.read_exact(&mut iv)?;
-        // Считываем оставшийся файл (шифротекст)
-        /* Создаем буфер для оставшегося шифротекста
-         * reader.metadata()?.len() - iv.len() дают размер шифротекста без вектора инициализации
-         * Плюс выделяем еще один байт сверху, для исключения перевыделения памяти под вектор
-         * Так как read_to_end считывает по одному байту в цикле, и конечный байт (EOF) не поместится в вектор
-         * Что вызовет новое выделение памяти
-         */
-        let capacity = reader.metadata()?.len() as usize - iv.len() + 1;
-        let mut buf: Vec<u8> = Vec::with_capacity(capacity);
+
         // Получаем 128-битный ключ
         let key = derive::derive_key(secret);
         // Инициализируем AES ключом и IV
         let mut aes = AesCtx::with_iv(key, iv);
-        // Расшифровываем
-        aes.aes_cbc_decrypt_buffer(reader, &mut buf)?;
-        // Передаем на декомпрессию (разархивирование)
-        lzw_struct.decompress(buf.as_slice(), &mut writer)?;
+        // Читаем первый блок
+        if reader.read(&mut buf_read)? != AES_BLOCKLEN {
+            panic!("Файл поврежден!");
+        }
+        // Цикл декомпрессии с расшифровкой
+        while {
+            // Отправляем блок на расшифровку
+            aes.aes_cbc_decrypt_buffer(buf_read.as_slice(), &mut buf_write)?;
+            // Читаем очередной  блок
+            let bytes_read = reader.read(&mut buf_read)?;
+            // Если достигли конца файла (EOF)
+            if bytes_read == 0 {
+                // То значит, что это последний блок
+                while buf_write.last().unwrap() == &0u8 {
+                    // Удаляем замыкающие нули (в соответствии с "Zero padding")
+                    buf_write.pop();
+                }
+            }            
+            // Распаковываем блок
+            lzw_struct.decompress(buf_write.as_slice(), &mut writer)?;
+            buf_write.clear();
+            // Если что-то считано - продолжаем работу
+            bytes_read != 0
+        } {}
         Ok(())
     }
 }
