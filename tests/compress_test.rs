@@ -1,27 +1,58 @@
 use lzw_arc::lzw;
-use same_file::is_same_file;
-use std::fs::remove_file;
+use sha1::{Sha1, Digest};
+use std::fs::{remove_file, File};
 
 #[test]
 fn compress_test() {
+
     lzw::compress("test-file", "compress_test", 16).unwrap();
-    let is_same = is_same_file("test-compressed", "compress_test").unwrap();
+    // Source hash
+    let mut file = File::open("test-compressed").unwrap();
+    let mut hasher = Sha1::new();
+    std::io::copy(&mut file, &mut hasher).unwrap();
+    let source_hash = hasher.result();
+    // Result hash
+    let mut file = File::open("compress_test").unwrap();
+    let mut hasher = Sha1::new();
+    std::io::copy(&mut file, &mut hasher).unwrap();
+    let result_hash = hasher.result();
+    
     remove_file("compress_test").unwrap();
-    assert!(is_same);
+    assert_eq!(source_hash, result_hash);
 }
 #[test]
 fn decompress_test() {
     lzw::decompress("test-compressed", "decompress_test", 16).unwrap();
-    let is_same = is_same_file("test-file", "decompress_test").unwrap();
+    // Source hash
+    let mut file = File::open("test-file").unwrap();
+    let mut hasher = Sha1::new();
+    std::io::copy(&mut file, &mut hasher).unwrap();
+    let source_hash = hasher.result();
+    // Result hash
+    let mut file = File::open("decompress_test").unwrap();
+    let mut hasher = Sha1::new();
+    std::io::copy(&mut file, &mut hasher).unwrap();
+    let result_hash = hasher.result();
+
     remove_file("decompress_test").unwrap();
-    assert!(is_same);
+    assert_eq!(source_hash, result_hash);
 }
 #[test]
 fn aes_test() {
     lzw::compress_aes("test-file", "aes_test", 16, "secret").unwrap();
     lzw::decompress_aes("aes_test", "aes_test_result", 16, "secret").unwrap();
-    let is_same = is_same_file("test-file", "aes_test_result").unwrap();
+    // Source hash
+    let mut file = File::open("test-file").unwrap();
+    let mut hasher = Sha1::new();
+    std::io::copy(&mut file, &mut hasher).unwrap();
+    let source_hash = hasher.result();
+    // Result hash
+    let mut file = File::open("aes_test_result").unwrap();
+    let mut hasher = Sha1::new();
+    std::io::copy(&mut file, &mut hasher).unwrap();
+    let result_hash = hasher.result();
+    
     remove_file("aes_test").unwrap();
     remove_file("aes_test_result").unwrap();
-    assert!(is_same);
+    assert_eq!(source_hash, result_hash);
 }

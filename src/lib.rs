@@ -59,8 +59,14 @@ pub mod lzw {
         bit_buf: BitVec<BigEndian, u8>,
     }
     impl Compress {
-        /// Инициализируем структуру начальными значениями
+        /// Создаем и получаем новый экземпляр
         fn new(max_bits_count: u8) -> Self {
+            let mut obj = Self::new_self(max_bits_count);
+            obj.reset_dictionary();
+            obj
+        }
+        /// Инициализируем структуру начальными значениями
+        fn new_self(max_bits_count: u8) -> Self {
             if max_bits_count > 32 || max_bits_count < 9 {
                 panic!("Недопустимый размер словаря! Разрешенный: 9 <= n <= 32");
             }
@@ -146,8 +152,14 @@ pub mod lzw {
         }
     }
     impl Decompress {
-        /// Инициализируем структуру начальными значениями
+        /// Создаем и получаем новый экземпляр
         fn new(max_bits_count: u8) -> Self {
+            let mut obj = Self::new_self(max_bits_count);
+            obj.reset_dictionary();
+            obj
+        }
+        /// Инициализируем структуру начальными значениями
+        fn new_self(max_bits_count: u8) -> Self {
             if max_bits_count > 32 || max_bits_count < 9 {
                 panic!("Недопустимый размер словаря! Разрешенный: 9 <= n <= 32");
             }
@@ -274,8 +286,6 @@ pub mod lzw {
         max_bits_count: usize,
     ) -> std::io::Result<()> {
         let mut lzw_struct = Compress::new(max_bits_count as u8);
-        // Обнуляем словарь
-        lzw_struct.reset_dictionary();
         let reader = File::open(source_file)?;
         let mut writer = File::create(result_file)?;
         // Сжимаем
@@ -291,7 +301,6 @@ pub mod lzw {
         max_bits_count: usize,
     ) -> std::io::Result<()> {
         let mut lzw_struct = Decompress::new(max_bits_count as u8);
-        lzw_struct.reset_dictionary();
         let reader = File::open(source_file)?;
         let mut writer = File::create(result_file)?;
         lzw_struct.decompress(reader, &mut writer)?;
@@ -307,7 +316,6 @@ pub mod lzw {
     ) -> std::io::Result<()> {
         // Инициализируем объекты
         let mut lzw_struct = Compress::new(max_bits_count as u8);
-        lzw_struct.reset_dictionary();
         let mut reader = BufReader::new(File::open(source_file)?);
         let mut writer = File::create(result_file)?;
         // Промежуточный буфер для чтения
@@ -350,7 +358,6 @@ pub mod lzw {
     ) -> std::io::Result<()> {
         // Инициализируем объекты
         let mut lzw_struct = Decompress::new(max_bits_count as u8);
-        lzw_struct.reset_dictionary();
         let mut reader = BufReader::new(File::open(source_file)?);
         let mut writer = File::create(result_file)?;
         // Промежуточный буфер для чтения

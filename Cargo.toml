@@ -1,6 +1,6 @@
 [package]
 name = "lzw_arc"
-version = "0.2.0"
+version = "0.2.1"
 authors = ["AlukardBF <alukard.develop@gmail.com>"]
 edition = "2018"
 publish = false
@@ -15,7 +15,7 @@ small_aes_rs = { git = "https://github.com/AlukardBF/small_aes_rs" }
 
 [dev-dependencies]
 criterion = "0.2"
-same-file = "1.0.4"
+sha-1 = "0.8.1"
 
 [[bench]]
 name = "archive_bench"
