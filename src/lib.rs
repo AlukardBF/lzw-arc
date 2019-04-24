@@ -58,24 +58,52 @@ pub mod lzw {
         // Буфер из бит, для добавления в результирующий поток
         bit_buf: BitVec<BigEndian, u8>,
     }
-    impl Compress {
-        /// Создаем и получаем новый экземпляр
-        fn new(max_bits_count: u8) -> Self {
-            let mut obj = Self::new_self(max_bits_count);
-            obj.reset_dictionary();
-            obj
+    impl Default for Compress {
+        fn default() -> Compress {
+            // Инициализируем словарь из всех значений, которые можно хранить
+            // в одном байте (0..255)
+            // Выделяем памяти в словаре под 65536 значений (для размера словаря по-умолчанию в 16 бит)
+            let mut dictionary: IndexSet<Vec<u8>> =
+                IndexSet::with_capacity(u16::max_value() as usize);
+            for ch in u8::min_value()..=u8::max_value() {
+                dictionary.insert(vec![ch]);
+            }
+            Compress {
+                dictionary,
+                bits_count: 8,
+                max_bits_count: 16,
+                prev: Vec::with_capacity(64),
+                bit_buf: BitVec::with_capacity(32),
+            }
         }
-        /// Инициализируем структуру начальными значениями
-        fn new_self(max_bits_count: u8) -> Self {
+    }
+    impl Default for Decompress {
+        fn default() -> Decompress {
+            // Инициализируем словарь из всех значений, которые можно хранить
+            // в одном байте (0..255)
+            // Выделяем памяти в словаре под 65536 значений (для размера словаря по-умолчанию в 16 бит)
+            let mut dictionary: Vec<Vec<u8>> = Vec::with_capacity(u16::max_value() as usize);
+            for ch in u8::min_value()..=u8::max_value() {
+                dictionary.push(vec![ch]);
+            }
+            Decompress {
+                dictionary,
+                bits_count: 8,
+                max_bits_count: 16,
+                index: 0,
+                string: Vec::new(),
+                bit_buf: BitVec::with_capacity(64),
+            }
+        }
+    }
+    impl Compress {
+        fn new(max_bits_count: u8) -> Self {
             if max_bits_count > 32 || max_bits_count < 9 {
                 panic!("Недопустимый размер словаря! Разрешенный: 9 <= n <= 32");
             }
             Self {
-                dictionary: IndexSet::new(),
-                bits_count: 8,
                 max_bits_count,
-                prev: Vec::with_capacity(64),
-                bit_buf: BitVec::with_capacity(32),
+                ..Default::default()
             }
         }
         fn compress<R: Read, W: Write>(
@@ -113,7 +141,7 @@ pub mod lzw {
             Ok(())
         }
         /// Добавляет оставшиеся в буфере байты в заданный поток
-        fn end<W: Write>(&mut self, writer: &mut W) -> std::io::Result<()> {
+        fn last_bytes<W: Write>(&mut self, writer: &mut W) -> std::io::Result<()> {
             // Добавляем в буфер оставшиеся байты
             self.append_to_buf(self.prev.to_vec());
             let last_bytes: Vec<u8> = self.bit_buf.as_slice().to_vec();
@@ -152,24 +180,13 @@ pub mod lzw {
         }
     }
     impl Decompress {
-        /// Создаем и получаем новый экземпляр
         fn new(max_bits_count: u8) -> Self {
-            let mut obj = Self::new_self(max_bits_count);
-            obj.reset_dictionary();
-            obj
-        }
-        /// Инициализируем структуру начальными значениями
-        fn new_self(max_bits_count: u8) -> Self {
             if max_bits_count > 32 || max_bits_count < 9 {
                 panic!("Недопустимый размер словаря! Разрешенный: 9 <= n <= 32");
             }
             Self {
-                dictionary: Vec::new(),
-                bits_count: 8,
                 max_bits_count,
-                index: 0,
-                string: Vec::new(),
-                bit_buf: BitVec::with_capacity(64),
+                ..Default::default()
             }
         }
         fn decompress<R: Read, W: Write>(
@@ -290,8 +307,8 @@ pub mod lzw {
         let mut writer = File::create(result_file)?;
         // Сжимаем
         lzw_struct.compress(reader, &mut writer)?;
-        // Обязательно вызываем end, переносим внутренний буфер в поток
-        lzw_struct.end(&mut writer)?;
+        // Обязательно вызываем last_bytes, переносим внутренний буфер в поток
+        lzw_struct.last_bytes(&mut writer)?;
         Ok(())
     }
     /// Запускает декомпрессию файла
@@ -345,7 +362,7 @@ pub mod lzw {
             }
         }
         // Получаем/шифруем остаток байт
-        lzw_struct.end(&mut buf_write)?;
+        lzw_struct.last_bytes(&mut buf_write)?;
         aes.aes_cbc_encrypt_buffer(buf_write.as_slice(), &mut writer)?;
         Ok(())
     }
@@ -389,7 +406,7 @@ pub mod lzw {
                     // Удаляем замыкающие нули (в соответствии с "Zero padding")
                     buf_write.pop();
                 }
-            }            
+            }
             // Распаковываем блок
             lzw_struct.decompress(buf_write.as_slice(), &mut writer)?;
             buf_write.clear();
